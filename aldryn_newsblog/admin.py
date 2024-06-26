@@ -2,7 +2,7 @@
 from __future__ import unicode_literals
 
 from django.contrib import admin
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 from cms.admin.placeholderadmin import (
     FrontendEditableAdminMixin, PlaceholderAdminMixin,
@@ -142,7 +142,8 @@ class ArticleAdmin(
             'fields': (
                 'tags',
                 'categories',
-                'related',
+                # se comenta para quitar el listado de articulos a relacionar
+                #'related',
                 'owner',
                 'app_config',
             )

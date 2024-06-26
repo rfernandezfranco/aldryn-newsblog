@@ -5,7 +5,7 @@ from django.contrib.sites.shortcuts import get_current_site
 from django.contrib.syndication.views import Feed
 from django.urls import reverse
 from django.utils.translation import get_language_from_request
-from django.utils.translation import ugettext as _
+from django.utils.translation import gettext as _
 
 from aldryn_apphooks_config.utils import get_app_instance
 from aldryn_categories.models import Category

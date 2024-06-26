@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 
 from django.urls import NoReverseMatch
 from django.utils.translation import get_language_from_request
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 from cms.apphook_pool import apphook_pool
 from cms.menu_bases import CMSAttachMenu
@@ -33,10 +33,7 @@ class NewsBlogMenu(CMSAttachMenu):
 
         if hasattr(self, 'instance') and self.instance:
             app = apphook_pool.get_apphook(self.instance.application_urls)
-
-        if app:
             config = app.get_config(self.instance.application_namespace)
-
             if config:
                 articles = articles.filter(app_config=config)
 

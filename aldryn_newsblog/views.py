@@ -28,6 +28,8 @@ from aldryn_newsblog.utils.utilities import get_valid_languages_from_request
 from .models import Article
 from .utils import add_prefix_to_path
 
+# se importa para la utilizacion de la zona horaria
+import pytz
 
 class TemplatePrefixMixin(object):
 
@@ -262,7 +264,7 @@ class ArticleSearchResultsList(ArticleListBase):
     def get(self, request, *args, **kwargs):
         self.query = request.GET.get('q')
         self.max_articles = request.GET.get('max_articles', 0)
-        self.edit_mode = (request.toolbar and toolbar_edit_mode_active(request))
+        self.edit_mode = (request.toolbar and toolbar_edit_mode_active (request))
         return super(ArticleSearchResultsList, self).get(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
@@ -294,8 +296,14 @@ class ArticleSearchResultsList(ArticleListBase):
         cxt['query'] = self.query
         return cxt
 
+##Fix
+    def is_ajax(request):
+        return request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest'
+##
+
     def get_template_names(self):
-        if self.request.is_ajax:
+#        if self.request.is_ajax:
+        if self.is_ajax:
             template_names = [self.partial_name]
         else:
             template_names = [self.template_name]
@@ -369,6 +377,7 @@ class TagArticleList(ArticleListBase):
         return super(TagArticleList, self).get_context_data(**kwargs)
 
 
+# modificado 7/4/21
 class DateRangeArticleList(ArticleListBase):
     """A list of articles for a specific date range"""
     def get_queryset(self):
@@ -396,30 +405,64 @@ class DateRangeArticleList(ArticleListBase):
         kwargs['newsblog_year'] = (
             int(self.kwargs.get('year')) if 'year' in self.kwargs else None)
         if kwargs['newsblog_year']:
-            kwargs['newsblog_archive_date'] = date(
+            # defino la zona horaria en utc 0
+            cero = pytz.timezone('Etc/GMT')
+            # a la definicion original se le agregan horas minutos y zona horaria para no generar warnings al comparar con timezonefield
+            # 0: horas
+            # 0: minutos
+            # astimezone(cero): agrea zona horaria en la utc 0
+            kwargs['newsblog_archive_date'] = datetime(
                 kwargs['newsblog_year'],
                 kwargs['newsblog_month'] or 1,
-                kwargs['newsblog_day'] or 1)
+                kwargs['newsblog_day'] or 1,
+                0,
+                0,).astimezone(cero)
         return super(DateRangeArticleList, self).get_context_data(**kwargs)
 
-
+# modificado 7/4/21
 class YearArticleList(DateRangeArticleList):
+    
     def _daterange_from_kwargs(self, kwargs):
-        date_from = datetime(int(kwargs['year']), 1, 1)
+        # defino la zona horaria en utc 0
+        cero = pytz.timezone('Etc/GMT')
+        # a la definicion original se le agregan horas minutos y zona horaria para no generar warnings al comparar con timezonefield
+        # 0: horas
+        # 0: minutos
+        # astimezone(cero): agrea zona horaria en la utc 0
+        date_from = datetime(int(kwargs['year']), 1, 1,
+                0,
+                0,).astimezone(cero)
         date_to = date_from + relativedelta(years=1)
         return date_from, date_to
 
-
+# modificado 7/4/21
 class MonthArticleList(DateRangeArticleList):
     def _daterange_from_kwargs(self, kwargs):
-        date_from = datetime(int(kwargs['year']), int(kwargs['month']), 1)
+        # defino la zona horaria en utc 0
+        cero = pytz.timezone('Etc/GMT')
+        # a la definicion original se le agregan horas minutos y zona horaria para no generar warnings al comparar con timezonefield
+        # 0: horas
+        # 0: minutos
+        # astimezone(cero): agrea zona horaria en la utc 0
+        date_from = datetime(int(kwargs['year']), int(kwargs['month']), 1,
+                0,
+                0,).astimezone(cero)
         date_to = date_from + relativedelta(months=1)
         return date_from, date_to
 
-
+# modificado 7/4/21
 class DayArticleList(DateRangeArticleList):
     def _daterange_from_kwargs(self, kwargs):
+        # defino la zona horaria en utc 0
+        cero = pytz.timezone('Etc/GMT')
+        # a la definicion original se le agregan horas minutos y zona horaria para no generar warnings al comparar con timezonefield
+        # 0: horas
+        # 0: minutos
+        # astimezone(cero): agrea zona horaria en la utc 0
         date_from = datetime(
-            int(kwargs['year']), int(kwargs['month']), int(kwargs['day']))
+            int(kwargs['year']), int(kwargs['month']), int(kwargs['day']),
+                0,
+                0,).astimezone(cero)
         date_to = date_from + relativedelta(days=1)
         return date_from, date_to
+

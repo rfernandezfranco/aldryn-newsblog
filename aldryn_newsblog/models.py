@@ -10,10 +10,11 @@ from django.db import connection, models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.urls import reverse
-from django.utils.encoding import force_text, python_2_unicode_compatible
+#from django.utils.encoding import force_str, python_2_unicode_compatible
+from six import python_2_unicode_compatible
 from django.utils.timezone import now
-from django.utils.translation import override, ugettext
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import override, gettext
+from django.utils.translation import gettext_lazy as _
 
 from cms.models.fields import PlaceholderField
 from cms.models.pluginmodel import CMSPlugin
@@ -227,9 +228,9 @@ class Article(TranslatedAutoSlugifyMixin,
         text_bits = [strip_tags(description)]
         for category in self.categories.all():
             text_bits.append(
-                force_text(category.safe_translation_getter('name')))
+                force_str(category.safe_translation_getter('name')))
         for tag in self.tags.all():
-            text_bits.append(force_text(tag.name))
+            text_bits.append(force_str(tag.name))
         if self.content:
             plugins = self.content.cmsplugin_set.filter(language=language)
             for base_plugin in plugins:
@@ -317,7 +318,7 @@ class NewsBlogArchivePlugin(PluginEditModeMixin, AdjustableCacheModelMixin,
     # NOTE: the PluginEditModeMixin is eventually used in the cmsplugin, not
     # here in the model.
     def __str__(self):
-        return ugettext('%s archive') % (self.app_config.get_app_title(), )
+        return gettext('%s archive') % (self.app_config.get_app_title(), )
 
 
 class NewsBlogArticleSearchPlugin(NewsBlogCMSPlugin):
@@ -328,7 +329,7 @@ class NewsBlogArticleSearchPlugin(NewsBlogCMSPlugin):
     )
 
     def __str__(self):
-        return ugettext('%s archive') % (self.app_config.get_app_title(), )
+        return gettext('%s archive') % (self.app_config.get_app_title(), )
 
 
 @python_2_unicode_compatible
@@ -369,13 +370,13 @@ class NewsBlogAuthorsPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
         return sorted(authors, key=lambda x: x.article_count, reverse=True)
 
     def __str__(self):
-        return ugettext('%s authors') % (self.app_config.get_app_title(), )
+        return gettext('%s authors') % (self.app_config.get_app_title(), )
 
 
 @python_2_unicode_compatible
 class NewsBlogCategoriesPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
     def __str__(self):
-        return ugettext('%s categories') % (self.app_config.get_app_title(), )
+        return gettext('%s categories') % (self.app_config.get_app_title(), )
 
     def get_categories(self, request):
         """
@@ -442,9 +443,9 @@ class NewsBlogFeaturedArticlesPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
             return 'featured articles'
         prefix = self.app_config.get_app_title()
         if self.article_count == 1:
-            title = ugettext('featured article')
+            title = gettext('featured article')
         else:
-            title = ugettext('featured articles: %(count)s') % {
+            title = gettext('featured articles: %(count)s') % {
                 'count': self.article_count,
             }
         return '{0} {1}'.format(prefix, title)
@@ -490,7 +491,7 @@ class NewsBlogLatestArticlesPlugin(PluginEditModeMixin,
         return queryset[:self.latest_articles]
 
     def __str__(self):
-        return ugettext('%(app_title)s latest articles: %(latest_articles)s') % {
+        return gettext('%(app_title)s latest articles: %(latest_articles)s') % {
             'app_title': self.app_config.get_app_title(),
             'latest_articles': self.latest_articles,
         }
@@ -522,7 +523,7 @@ class NewsBlogRelatedPlugin(PluginEditModeMixin, AdjustableCacheModelMixin,
         return qs
 
     def __str__(self):
-        return ugettext('Related articles')
+        return gettext('Related articles')
 
 
 @python_2_unicode_compatible
@@ -564,7 +565,7 @@ class NewsBlogTagsPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
         return sorted(tags, key=lambda x: x.article_count, reverse=True)
 
     def __str__(self):
-        return ugettext('%s tags') % (self.app_config.get_app_title(), )
+        return gettext('%s tags') % (self.app_config.get_app_title(), )
 
 
 @receiver(post_save, dispatch_uid='article_update_search_data')

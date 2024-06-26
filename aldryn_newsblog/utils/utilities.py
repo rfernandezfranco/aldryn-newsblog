@@ -10,7 +10,7 @@ from django.db import models
 from django.test import RequestFactory
 from django.urls import NoReverseMatch, reverse
 from django.utils import translation
-from django.utils.encoding import force_text
+from django.utils.encoding import force_str
 from django.utils.html import strip_tags as _strip_tags
 from django.utils.text import smart_split
 
@@ -73,7 +73,7 @@ def strip_tags(value):
 
 
 def get_cleaned_bits(data):
-    decoded = force_text(data)
+    decoded = force_str(data)
     stripped = strip_tags(decoded)
     return smart_split(stripped)
 
@@ -191,7 +191,7 @@ def get_valid_languages(namespace, language_code, site_id=None):
     langs = [language_code]
     if site_id is None:
         site_id = getattr(Site.objects.get_current(), 'pk', None)
-    current_language = get_language_object(language_code, site_id)
+    current_language = get_language_object('es', site_id)
     fallbacks = current_language.get('fallbacks', None)
     if fallbacks:
         langs += list(fallbacks)
