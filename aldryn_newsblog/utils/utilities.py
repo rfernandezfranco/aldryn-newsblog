@@ -20,6 +20,10 @@ from cms.utils.i18n import force_language, get_language_object
 from lxml.html.clean import Cleaner as LxmlCleaner
 
 
+HTML_CLEANER = LxmlCleaner()
+_VALID_LANGUAGES_CACHE = {}
+
+
 def default_reverse(*args, **kwargs):
     """
     Acts just like django.urls.reverse() except that if the
@@ -67,7 +71,7 @@ def strip_tags(value):
         value = value.strip()
 
     if value:
-        partial_strip = LxmlCleaner().clean_html(value)
+        partial_strip = HTML_CLEANER.clean_html(value)
         value = _strip_tags(partial_strip)
     return value
 
@@ -103,7 +107,10 @@ def get_field_value(obj, name):
 
 
 def render_plugin(request, plugin_instance):
-    renderer = ContentRenderer(request)
+    renderer = getattr(request, '_newsblog_renderer', None)
+    if renderer is None:
+        renderer = ContentRenderer(request)
+        request._newsblog_renderer = renderer
     context = {'request': request}
     return renderer.render_plugin(plugin_instance, context)
 
@@ -188,14 +195,22 @@ def get_valid_languages_from_request(namespace, request):
 
 
 def get_valid_languages(namespace, language_code, site_id=None):
-    langs = [language_code]
     if site_id is None:
-        site_id = getattr(Site.objects.get_current(), 'pk', None)
-    current_language = get_language_object('es', site_id)
+        site_id = getattr(settings, 'SITE_ID', None)
+        if site_id is None:
+            site_id = getattr(Site.objects.get_current(), 'pk', None)
+    cache_key = (namespace, language_code, site_id)
+    cached = _VALID_LANGUAGES_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    langs = [language_code]
+    current_language = get_language_object(language_code, site_id)
     fallbacks = current_language.get('fallbacks', None)
     if fallbacks:
         langs += list(fallbacks)
     valid_translations = [
         lang_code for lang_code in langs
-        if is_valid_namespace_for_language(namespace, lang_code)]
+        if is_valid_namespace_for_language(namespace, lang_code)
+    ]
+    _VALID_LANGUAGES_CACHE[cache_key] = valid_translations
     return valid_translations

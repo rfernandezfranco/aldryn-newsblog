@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 
 from datetime import date, datetime
 
-from django.db.models import Q
+from django.db.models import Q, Subquery
 from django.http import (
     Http404, HttpResponsePermanentRedirect, HttpResponseRedirect,
 )
@@ -167,8 +167,8 @@ class ArticleDetail(AppConfigMixin, AppHookCheckMixin, PreviewModeMixin,
 
     def get_context_data(self, **kwargs):
         context = super(ArticleDetail, self).get_context_data(**kwargs)
-        base_qs = self.get_queryset().filter(app_config=self.config).only(
-            'pk', 'publishing_date'
+        base_qs = Article.objects.filter(app_config=self.config).only(
+            'pk', 'publishing_date', 'translations__slug'
         )
         context['prev_article'] = self.get_prev_object(base_qs, self.object)
         context['next_article'] = self.get_next_object(base_qs, self.object)
@@ -243,22 +243,27 @@ class ArticleList(ArticleListBase):
         return self.get(request, *args, **kwargs)
 
     def get_queryset(self):
-        qs = super(ArticleList, self).get_queryset()
+        base_qs = Article.objects.filter(app_config=self.config)
+        qs = base_qs
         exclude_count = self.config.exclude_featured
-        if exclude_count:
-            featured_qs = Article.objects.filter(
-                app_config=self.config, is_featured=True
-            )
+        user = self.request.user
+        user_can_edit = user.is_staff or user.is_superuser
+        if not (self.edit_mode or user_can_edit):
+            qs = qs.published()
+        languages = getattr(self, 'valid_languages', None)
+        if languages:
+            qs = qs.translated(*languages)
+        language = translation.get_language()
+        qs = qs.active_translations(language)
+        if exclude_count > 0:
+            featured_qs = base_qs.filter(is_featured=True)
             if not self.edit_mode:
                 featured_qs = featured_qs.published()
-            languages = getattr(self, 'valid_languages', None)
             if languages:
                 featured_qs = featured_qs.translated(*languages)
-            featured_ids = list(
-                featured_qs.values_list('pk', flat=True)[:exclude_count]
+            qs = qs.exclude(
+                pk__in=Subquery(featured_qs.values('pk')[:exclude_count])
             )
-            if featured_ids:
-                qs = qs.exclude(pk__in=featured_ids)
         return qs
 
 
@@ -270,8 +275,12 @@ class ArticleSearchResultsList(ArticleListBase):
 
     def get(self, request, *args, **kwargs):
         self.query = request.GET.get('q')
-        self.max_articles = request.GET.get('max_articles', 0)
-        self.edit_mode = (request.toolbar and toolbar_edit_mode_active (request))
+        max_articles = request.GET.get('max_articles')
+        try:
+            self.max_articles = max(0, int(max_articles))
+        except (TypeError, ValueError):
+            self.max_articles = 0
+        self.edit_mode = (request.toolbar and toolbar_edit_mode_active(request))
         return super(ArticleSearchResultsList, self).get(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
@@ -283,7 +292,7 @@ class ArticleSearchResultsList(ArticleListBase):
         paginate by the app_config's settings.
         """
         return self.max_articles or super(
-            ArticleSearchResultsList, self).get_paginate_by(self.get_queryset())
+            ArticleSearchResultsList, self).get_paginate_by(queryset)
 
     def get_queryset(self):
         qs = super(ArticleSearchResultsList, self).get_queryset()

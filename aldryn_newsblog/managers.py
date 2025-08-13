@@ -3,19 +3,18 @@
 from __future__ import unicode_literals
 
 import datetime
-from operator import attrgetter
-
 from django.core.cache import cache
 from django.db import models
-from django.db.models import Count
+from django.db.models import Count, Subquery
 from django.db.models.functions import TruncMonth
 from django.utils.timezone import now
 from django.utils.translation import get_language
 
 from aldryn_apphooks_config.managers.base import ManagerMixin, QuerySetMixin
 from aldryn_people.models import Person
+from django.contrib.contenttypes.models import ContentType
 from parler.managers import TranslatableManager, TranslatableQuerySet
-from taggit.models import Tag, TaggedItem
+from taggit.models import Tag
 
 from aldryn_newsblog.compat import toolbar_edit_mode_active
 
@@ -115,19 +114,10 @@ class RelatedManager(ManagerMixin, TranslatableManager):
         else:
             articles = self.published().namespace(namespace)
         if not articles.exists():
-            # return empty iterable early not to perform useless requests
             return []
-        kwargs = TaggedItem.bulk_lookup_kwargs(articles)
-
-        # aggregate and sort
-        counted_tags = dict(TaggedItem.objects
-                            .filter(**kwargs)
-                            .values('tag')
-                            .annotate(tag_count=models.Count('tag'))
-                            .values_list('tag', 'tag_count'))
-
-        # and finally get the results
-        tags = Tag.objects.filter(pk__in=counted_tags.keys())
-        for tag in tags:
-            tag.num_articles = counted_tags[tag.pk]
-        return sorted(tags, key=attrgetter('num_articles'), reverse=True)
+        article_ct = ContentType.objects.get_for_model(self.model)
+        qs = Tag.objects.filter(
+            taggit_taggeditem_items__content_type=article_ct,
+            taggit_taggeditem_items__object_id__in=Subquery(articles.values('pk')),
+        ).annotate(num_articles=models.Count('taggit_taggeditem_items'))
+        return list(qs.order_by('-num_articles'))
