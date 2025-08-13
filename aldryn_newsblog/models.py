@@ -7,10 +7,12 @@ from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connection, models
+from django.db.models import Count, Q
+from django.core.cache import cache
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.urls import reverse
-#from django.utils.encoding import force_str, python_2_unicode_compatible
+from django.utils.encoding import force_str
 from six import python_2_unicode_compatible
 from django.utils.timezone import now
 from django.utils.translation import override, gettext
@@ -226,16 +228,18 @@ class Article(TranslatedAutoSlugifyMixin,
             request = get_request(language=language)
         description = self.safe_translation_getter('lead_in', '')
         text_bits = [strip_tags(description)]
-        for category in self.categories.all():
-            text_bits.append(
-                force_str(category.safe_translation_getter('name')))
-        for tag in self.tags.all():
-            text_bits.append(force_str(tag.name))
+        category_names = self.categories.translated(language).values_list(
+            'translations__name', flat=True
+        )
+        text_bits.extend(force_str(name) for name in category_names)
+        tag_names = self.tags.values_list('name', flat=True)
+        text_bits.extend(force_str(name) for name in tag_names)
         if self.content:
             plugins = self.content.cmsplugin_set.filter(language=language)
             for base_plugin in plugins:
                 plugin_text_content = ' '.join(
-                    get_plugin_index_data(base_plugin, request))
+                    get_plugin_index_data(base_plugin, request)
+                )
                 text_bits.append(plugin_text_content)
         return ' '.join(text_bits)
 
@@ -343,31 +347,27 @@ class NewsBlogAuthorsPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
         user is a logged-in cms operator, then it will be all articles.
         """
 
-        # The basic subquery (for logged-in content managers in edit mode)
-        subquery = """
-            SELECT COUNT(*)
-            FROM aldryn_newsblog_article
-            WHERE
-                aldryn_newsblog_article.author_id =
-                    aldryn_people_person.id AND
-                aldryn_newsblog_article.app_config_id = %d"""
-
-        # For other users, limit subquery to published articles
-        if not self.get_edit_mode(request):
-            subquery += """ AND
-                aldryn_newsblog_article.is_published %s AND
-                aldryn_newsblog_article.publishing_date <= %s
-            """ % (SQL_IS_TRUE, SQL_NOW_FUNC, )
-
-        # Now, use this subquery in the construction of the main query.
-        query = """
-            SELECT (%s) as article_count, aldryn_people_person.*
-            FROM aldryn_people_person
-        """ % (subquery % (self.app_config.pk, ), )
-
-        raw_authors = list(Person.objects.raw(query))
-        authors = [author for author in raw_authors if author.article_count]
-        return sorted(authors, key=lambda x: x.article_count, reverse=True)
+        edit_mode = self.get_edit_mode(request)
+        cache_key = 'nb_authors_%s_%s_%s' % (
+            self.app_config_id, self.language, int(edit_mode)
+        )
+        authors = cache.get(cache_key)
+        if authors is not None:
+            return authors
+        qs = Person.objects.filter(article__app_config=self.app_config)
+        if not edit_mode:
+            qs = qs.filter(
+                article__is_published=True,
+                article__publishing_date__lte=now(),
+            )
+        languages = get_valid_languages_from_request(
+            self.app_config.namespace, request
+        )
+        qs = qs.filter(article__translations__language_code__in=languages)
+        qs = qs.annotate(article_count=Count('article', distinct=True))
+        authors = list(qs.order_by('-article_count'))
+        cache.set(cache_key, authors)
+        return authors
 
     def __str__(self):
         return gettext('%s authors') % (self.app_config.get_app_title(), )
@@ -379,40 +379,27 @@ class NewsBlogCategoriesPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
         return gettext('%s categories') % (self.app_config.get_app_title(), )
 
     def get_categories(self, request):
-        """
-        Returns a list of categories, annotated by the number of articles
-        (article_count) that are visible to the current user. If this user is
-        anonymous, then this will be all articles that are published and whose
-        publishing_date has passed. If the user is a logged-in cms operator,
-        then it will be all articles.
-        """
-
-        subquery = """
-            SELECT COUNT(*)
-            FROM aldryn_newsblog_article, aldryn_newsblog_article_categories
-            WHERE
-                aldryn_newsblog_article_categories.category_id =
-                    aldryn_categories_category.id AND
-                aldryn_newsblog_article_categories.article_id =
-                    aldryn_newsblog_article.id AND
-                aldryn_newsblog_article.app_config_id = %d
-        """ % (self.app_config.pk, )
-
-        if not self.get_edit_mode(request):
-            subquery += """ AND
-                aldryn_newsblog_article.is_published %s AND
-                aldryn_newsblog_article.publishing_date <= %s
-            """ % (SQL_IS_TRUE, SQL_NOW_FUNC, )
-
-        query = """
-            SELECT (%s) as article_count, aldryn_categories_category.*
-            FROM aldryn_categories_category
-        """ % (subquery, )
-
-        raw_categories = list(Category.objects.raw(query))
-        categories = [
-            category for category in raw_categories if category.article_count]
-        return sorted(categories, key=lambda x: x.article_count, reverse=True)
+        edit_mode = self.get_edit_mode(request)
+        cache_key = 'nb_categories_%s_%s_%s' % (
+            self.app_config_id, self.language, int(edit_mode)
+        )
+        categories = cache.get(cache_key)
+        if categories is not None:
+            return categories
+        qs = Category.objects.filter(article__app_config=self.app_config)
+        if not edit_mode:
+            qs = qs.filter(
+                article__is_published=True,
+                article__publishing_date__lte=now(),
+            )
+        languages = get_valid_languages_from_request(
+            self.app_config.namespace, request
+        )
+        qs = qs.filter(article__translations__language_code__in=languages)
+        qs = qs.annotate(article_count=Count('article', distinct=True))
+        categories = list(qs.order_by('-article_count'))
+        cache.set(cache_key, categories)
+        return categories
 
 
 @python_2_unicode_compatible
@@ -472,8 +459,10 @@ class NewsBlogLatestArticlesPlugin(PluginEditModeMixin,
         Returns a queryset of the latest N articles. N is the plugin setting:
         latest_articles.
         """
-        queryset = Article.objects
-        featured_qs = Article.objects.all().filter(is_featured=True)
+        queryset = Article.objects.filter(app_config=self.app_config)
+        featured_qs = Article.objects.filter(
+            app_config=self.app_config, is_featured=True
+        )
         if not self.get_edit_mode(request):
             queryset = queryset.published()
             featured_qs = featured_qs.published()
@@ -481,13 +470,13 @@ class NewsBlogLatestArticlesPlugin(PluginEditModeMixin,
             self.app_config.namespace, request)
         if self.language not in languages:
             return queryset.none()
-        queryset = queryset.translated(*languages).filter(
-            app_config=self.app_config)
-        featured_qs = featured_qs.translated(*languages).filter(
-            app_config=self.app_config)
-        exclude_featured = featured_qs.values_list(
-            'pk', flat=True)[:self.exclude_featured]
-        queryset = queryset.exclude(pk__in=list(exclude_featured))
+        queryset = queryset.translated(*languages)
+        featured_qs = featured_qs.translated(*languages)
+        featured_ids = list(
+            featured_qs.values_list('pk', flat=True)[:self.exclude_featured]
+        )
+        if featured_ids:
+            queryset = queryset.exclude(pk__in=featured_ids)
         return queryset[:self.latest_articles]
 
     def __str__(self):
@@ -530,39 +519,31 @@ class NewsBlogRelatedPlugin(PluginEditModeMixin, AdjustableCacheModelMixin,
 class NewsBlogTagsPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
 
     def get_tags(self, request):
-        """
-        Returns a queryset of tags, annotated by the number of articles
-        (article_count) that are visible to the current user. If this user is
-        anonymous, then this will be all articles that are published and whose
-        publishing_date has passed. If the user is a logged-in cms operator,
-        then it will be all articles.
-        """
-
-        article_content_type = ContentType.objects.get_for_model(Article)
-
-        subquery = """
-            SELECT COUNT(*)
-            FROM aldryn_newsblog_article, taggit_taggeditem
-            WHERE
-                taggit_taggeditem.tag_id = taggit_tag.id AND
-                taggit_taggeditem.content_type_id = %d AND
-                taggit_taggeditem.object_id = aldryn_newsblog_article.id AND
-                aldryn_newsblog_article.app_config_id = %d"""
-
-        if not self.get_edit_mode(request):
-            subquery += """ AND
-                aldryn_newsblog_article.is_published %s AND
-                aldryn_newsblog_article.publishing_date <= %s
-            """ % (SQL_IS_TRUE, SQL_NOW_FUNC, )
-
-        query = """
-            SELECT (%s) as article_count, taggit_tag.*
-            FROM taggit_tag
-        """ % (subquery % (article_content_type.id, self.app_config.pk), )
-
-        raw_tags = list(Tag.objects.raw(query))
-        tags = [tag for tag in raw_tags if tag.article_count]
-        return sorted(tags, key=lambda x: x.article_count, reverse=True)
+        edit_mode = self.get_edit_mode(request)
+        cache_key = 'nb_tags_%s_%s_%s' % (
+            self.app_config_id, self.language, int(edit_mode)
+        )
+        tags = cache.get(cache_key)
+        if tags is not None:
+            return tags
+        article_ct = ContentType.objects.get_for_model(Article)
+        articles = Article.objects.filter(app_config=self.app_config)
+        if not edit_mode:
+            articles = articles.filter(
+                is_published=True,
+                publishing_date__lte=now(),
+            )
+        languages = get_valid_languages_from_request(
+            self.app_config.namespace, request
+        )
+        articles = articles.translated(*languages)
+        qs = Tag.objects.filter(
+            taggit_taggeditem_items__content_type=article_ct,
+            taggit_taggeditem_items__object_id__in=articles.values_list('pk', flat=True),
+        ).annotate(article_count=Count('taggit_taggeditem_items'))
+        tags = list(qs.order_by('-article_count'))
+        cache.set(cache_key, tags)
+        return tags
 
     def __str__(self):
         return gettext('%s tags') % (self.app_config.get_app_title(), )

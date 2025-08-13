@@ -31,6 +31,8 @@ from .utils import add_prefix_to_path
 # se importa para la utilizacion de la zona horaria
 import pytz
 
+UTC_ZERO = pytz.timezone('Etc/GMT')
+
 class TemplatePrefixMixin(object):
 
     def prefix_template_names(self, template_names):
@@ -107,6 +109,15 @@ class ArticleDetail(AppConfigMixin, AppHookCheckMixin, PreviewModeMixin,
     slug_url_kwarg = 'slug'
     pk_url_kwarg = 'pk'
 
+    def get_queryset(self):
+        qs = super(ArticleDetail, self).get_queryset()
+        return qs.select_related(
+            'author',
+            'author__user',
+            'app_config',
+            'owner',
+        ).prefetch_related('categories', 'tags')
+
     def get(self, request, *args, **kwargs):
         """
         This handles non-permalinked URLs according to preferences as set in
@@ -156,47 +167,37 @@ class ArticleDetail(AppConfigMixin, AppHookCheckMixin, PreviewModeMixin,
 
     def get_context_data(self, **kwargs):
         context = super(ArticleDetail, self).get_context_data(**kwargs)
-        context['prev_article'] = self.get_prev_object(
-            self.queryset, self.object)
-        context['next_article'] = self.get_next_object(
-            self.queryset, self.object)
+        base_qs = self.get_queryset().filter(app_config=self.config).only(
+            'pk', 'publishing_date'
+        )
+        context['prev_article'] = self.get_prev_object(base_qs, self.object)
+        context['next_article'] = self.get_next_object(base_qs, self.object)
         return context
 
-    def get_prev_object(self, queryset=None, object=None):
-        if queryset is None:
-            queryset = self.get_queryset()
-        if object is None:
-            object = self.get_object(self)
-        prev_objs = queryset.filter(
-            publishing_date__lt=object.publishing_date
-        ).order_by(
-            '-publishing_date'
-        )[:1]
-        if prev_objs:
-            return prev_objs[0]
-        else:
-            return None
+    def get_prev_object(self, queryset, obj):
+        return queryset.filter(
+            publishing_date__lt=obj.publishing_date
+        ).order_by('-publishing_date').first()
 
-    def get_next_object(self, queryset=None, object=None):
-        if queryset is None:
-            queryset = self.get_queryset()
-        if object is None:
-            object = self.get_object(self)
-        next_objs = queryset.filter(
-            publishing_date__gt=object.publishing_date
-        ).order_by(
-            'publishing_date'
-        )[:1]
-        if next_objs:
-            return next_objs[0]
-        else:
-            return None
+    def get_next_object(self, queryset, obj):
+        return queryset.filter(
+            publishing_date__gt=obj.publishing_date
+        ).order_by('publishing_date').first()
 
 
 class ArticleListBase(AppConfigMixin, AppHookCheckMixin, TemplatePrefixMixin,
                       PreviewModeMixin, ViewUrlMixin, ListView):
     model = Article
     show_header = False
+
+    def get_queryset(self):
+        qs = super(ArticleListBase, self).get_queryset()
+        return qs.select_related(
+            'author',
+            'author__user',
+            'app_config',
+            'owner',
+        ).prefetch_related('categories', 'tags')
 
     def get_paginate_by(self, queryset):
         if self.paginate_by is not None:
@@ -243,15 +244,21 @@ class ArticleList(ArticleListBase):
 
     def get_queryset(self):
         qs = super(ArticleList, self).get_queryset()
-        # exclude featured articles from queryset, to allow featured article
-        # plugin on the list view page without duplicate entries in page qs.
         exclude_count = self.config.exclude_featured
         if exclude_count:
-            featured_qs = Article.objects.all().filter(is_featured=True)
+            featured_qs = Article.objects.filter(
+                app_config=self.config, is_featured=True
+            )
             if not self.edit_mode:
                 featured_qs = featured_qs.published()
-            exclude_featured = featured_qs[:exclude_count].values_list('pk')
-            qs = qs.exclude(pk__in=exclude_featured)
+            languages = getattr(self, 'valid_languages', None)
+            if languages:
+                featured_qs = featured_qs.translated(*languages)
+            featured_ids = list(
+                featured_qs.values_list('pk', flat=True)[:exclude_count]
+            )
+            if featured_ids:
+                qs = qs.exclude(pk__in=featured_ids)
         return qs
 
 
@@ -296,14 +303,11 @@ class ArticleSearchResultsList(ArticleListBase):
         cxt['query'] = self.query
         return cxt
 
-##Fix
-    def is_ajax(request):
+    def is_ajax(self, request):
         return request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest'
-##
 
     def get_template_names(self):
-#        if self.request.is_ajax:
-        if self.is_ajax:
+        if self.is_ajax(self.request):
             template_names = [self.partial_name]
         else:
             template_names = [self.template_name]
@@ -405,64 +409,37 @@ class DateRangeArticleList(ArticleListBase):
         kwargs['newsblog_year'] = (
             int(self.kwargs.get('year')) if 'year' in self.kwargs else None)
         if kwargs['newsblog_year']:
-            # defino la zona horaria en utc 0
-            cero = pytz.timezone('Etc/GMT')
-            # a la definicion original se le agregan horas minutos y zona horaria para no generar warnings al comparar con timezonefield
-            # 0: horas
-            # 0: minutos
-            # astimezone(cero): agrea zona horaria en la utc 0
             kwargs['newsblog_archive_date'] = datetime(
                 kwargs['newsblog_year'],
                 kwargs['newsblog_month'] or 1,
                 kwargs['newsblog_day'] or 1,
                 0,
-                0,).astimezone(cero)
+                0,
+                tzinfo=UTC_ZERO,
+            )
         return super(DateRangeArticleList, self).get_context_data(**kwargs)
 
 # modificado 7/4/21
 class YearArticleList(DateRangeArticleList):
-    
+
     def _daterange_from_kwargs(self, kwargs):
-        # defino la zona horaria en utc 0
-        cero = pytz.timezone('Etc/GMT')
-        # a la definicion original se le agregan horas minutos y zona horaria para no generar warnings al comparar con timezonefield
-        # 0: horas
-        # 0: minutos
-        # astimezone(cero): agrea zona horaria en la utc 0
-        date_from = datetime(int(kwargs['year']), 1, 1,
-                0,
-                0,).astimezone(cero)
+        date_from = datetime(int(kwargs['year']), 1, 1, tzinfo=UTC_ZERO)
         date_to = date_from + relativedelta(years=1)
         return date_from, date_to
 
-# modificado 7/4/21
 class MonthArticleList(DateRangeArticleList):
     def _daterange_from_kwargs(self, kwargs):
-        # defino la zona horaria en utc 0
-        cero = pytz.timezone('Etc/GMT')
-        # a la definicion original se le agregan horas minutos y zona horaria para no generar warnings al comparar con timezonefield
-        # 0: horas
-        # 0: minutos
-        # astimezone(cero): agrea zona horaria en la utc 0
-        date_from = datetime(int(kwargs['year']), int(kwargs['month']), 1,
-                0,
-                0,).astimezone(cero)
+        date_from = datetime(
+            int(kwargs['year']), int(kwargs['month']), 1, tzinfo=UTC_ZERO
+        )
         date_to = date_from + relativedelta(months=1)
         return date_from, date_to
 
-# modificado 7/4/21
 class DayArticleList(DateRangeArticleList):
     def _daterange_from_kwargs(self, kwargs):
-        # defino la zona horaria en utc 0
-        cero = pytz.timezone('Etc/GMT')
-        # a la definicion original se le agregan horas minutos y zona horaria para no generar warnings al comparar con timezonefield
-        # 0: horas
-        # 0: minutos
-        # astimezone(cero): agrea zona horaria en la utc 0
         date_from = datetime(
             int(kwargs['year']), int(kwargs['month']), int(kwargs['day']),
-                0,
-                0,).astimezone(cero)
+            tzinfo=UTC_ZERO,
+        )
         date_to = date_from + relativedelta(days=1)
         return date_from, date_to
-
