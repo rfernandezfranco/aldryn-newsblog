@@ -3,11 +3,14 @@
 from __future__ import unicode_literals
 
 import datetime
-from collections import Counter
 from operator import attrgetter
 
+from django.core.cache import cache
 from django.db import models
+from django.db.models import Count
+from django.db.models.functions import TruncMonth
 from django.utils.timezone import now
+from django.utils.translation import get_language
 
 from aldryn_apphooks_config.managers.base import ManagerMixin, QuerySetMixin
 from aldryn_people.models import Person
@@ -29,10 +32,17 @@ class ArticleQuerySet(QuerySetMixin, TranslatableQuerySet):
 class RelatedManager(ManagerMixin, TranslatableManager):
     def get_queryset(self):
         qs = ArticleQuerySet(self.model, using=self.db)
-        return qs.select_related('featured_image')
+        return qs.select_related(
+            'app_config',
+            'author',
+            'author__user',
+            'owner',
+            'featured_image',
+        ).prefetch_related('categories', 'tags')
 
     def published(self):
         return self.get_queryset().published()
+
 
     def get_months(self, request, namespace):
         """
@@ -52,28 +62,33 @@ class RelatedManager(ManagerMixin, TranslatableManager):
             ...
         ]
         """
+        edit_mode = (
+            request and hasattr(request, 'toolbar') and request.toolbar and
+            toolbar_edit_mode_active(request)
+        )
+        language = getattr(request, 'LANGUAGE_CODE', None) or get_language()
+        cache_key = 'nb_months_%s_%s_%s' % (namespace, language, int(edit_mode))
+        months = cache.get(cache_key)
+        if months is not None:
+            return months
 
-        # TODO: check if this limitation still exists in Django 1.6+
-        # This is done in a naive way as Django is having tough time while
-        # aggregating on date fields
-        if (request and hasattr(request, 'toolbar') and  # noqa: #W504
-                request.toolbar and toolbar_edit_mode_active(request)):
+        if edit_mode:
             articles = self.namespace(namespace)
         else:
             articles = self.published().namespace(namespace)
-        dates = articles.values_list('publishing_date', flat=True)
-        dates = [(x.year, x.month) for x in dates]
-        date_counter = Counter(dates)
-        dates = set(dates)
-        dates = sorted(dates, reverse=True)
-        months = [
-            # Use day=3 to make sure timezone won't affect this hacks'
-            # month value. There are UTC+14 and UTC-12 timezones!
-            {'date': datetime.date(year=year, month=month, day=3),
-             'num_articles': date_counter[(year, month)]}
-            for year, month in dates]
-        return months
 
+        months_qs = (
+            articles.annotate(month=TruncMonth('publishing_date'))
+            .values('month')
+            .annotate(num_articles=Count('pk'))
+            .order_by('-month')
+        )
+        months = [
+            {'date': entry['month'].date(), 'num_articles': entry['num_articles']}
+            for entry in months_qs
+        ]
+        cache.set(cache_key, months)
+        return months
     def get_authors(self, namespace):
         """
         Get authors with articles count for given namespace string.
@@ -99,7 +114,7 @@ class RelatedManager(ManagerMixin, TranslatableManager):
             articles = self.namespace(namespace)
         else:
             articles = self.published().namespace(namespace)
-        if not articles:
+        if not articles.exists():
             # return empty iterable early not to perform useless requests
             return []
         kwargs = TaggedItem.bulk_lookup_kwargs(articles)
