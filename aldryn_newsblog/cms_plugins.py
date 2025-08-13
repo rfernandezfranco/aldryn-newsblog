@@ -173,9 +173,9 @@ class NewsBlogRelatedPlugin(AdjustableCacheMixin, NewsBlogPlugin):
             namespace = request.resolver_match.namespace
             if view_name == '{0}:article-detail'.format(namespace):
                 article = models.Article.objects.active_translations(
-                    slug=request.resolver_match.kwargs['slug'])
-                if article.count() == 1:
-                    return article[0]
+                    slug=request.resolver_match.kwargs['slug']
+                ).first()
+                return article
         return None
 
     def render(self, context, instance, placeholder):

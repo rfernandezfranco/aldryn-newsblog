@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connection, models
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Subquery
 from django.core.cache import cache
 from django.db.models.signals import post_save
 from django.dispatch import receiver
@@ -354,16 +354,19 @@ class NewsBlogAuthorsPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
         authors = cache.get(cache_key)
         if authors is not None:
             return authors
-        qs = Person.objects.filter(article__app_config=self.app_config)
+        articles = Article.objects.filter(app_config=self.app_config)
         if not edit_mode:
-            qs = qs.filter(
-                article__is_published=True,
-                article__publishing_date__lte=now(),
+            articles = articles.filter(
+                is_published=True,
+                publishing_date__lte=now(),
             )
         languages = get_valid_languages_from_request(
             self.app_config.namespace, request
         )
-        qs = qs.filter(article__translations__language_code__in=languages)
+        articles = articles.translated(*languages)
+        qs = Person.objects.filter(
+            article__in=Subquery(articles.values('pk'))
+        ).distinct()
         qs = qs.annotate(article_count=Count('article', distinct=True))
         authors = list(qs.order_by('-article_count'))
         cache.set(cache_key, authors)
@@ -386,16 +389,19 @@ class NewsBlogCategoriesPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
         categories = cache.get(cache_key)
         if categories is not None:
             return categories
-        qs = Category.objects.filter(article__app_config=self.app_config)
+        articles = Article.objects.filter(app_config=self.app_config)
         if not edit_mode:
-            qs = qs.filter(
-                article__is_published=True,
-                article__publishing_date__lte=now(),
+            articles = articles.filter(
+                is_published=True,
+                publishing_date__lte=now(),
             )
         languages = get_valid_languages_from_request(
             self.app_config.namespace, request
         )
-        qs = qs.filter(article__translations__language_code__in=languages)
+        articles = articles.translated(*languages)
+        qs = Category.objects.filter(
+            article__in=Subquery(articles.values('pk'))
+        ).distinct()
         qs = qs.annotate(article_count=Count('article', distinct=True))
         categories = list(qs.order_by('-article_count'))
         cache.set(cache_key, categories)
@@ -459,24 +465,25 @@ class NewsBlogLatestArticlesPlugin(PluginEditModeMixin,
         Returns a queryset of the latest N articles. N is the plugin setting:
         latest_articles.
         """
-        queryset = Article.objects.filter(app_config=self.app_config)
-        featured_qs = Article.objects.filter(
-            app_config=self.app_config, is_featured=True
-        )
+        base_qs = Article.objects.filter(app_config=self.app_config)
+        queryset = base_qs
         if not self.get_edit_mode(request):
             queryset = queryset.published()
-            featured_qs = featured_qs.published()
         languages = get_valid_languages_from_request(
             self.app_config.namespace, request)
         if self.language not in languages:
             return queryset.none()
         queryset = queryset.translated(*languages)
-        featured_qs = featured_qs.translated(*languages)
-        featured_ids = list(
-            featured_qs.values_list('pk', flat=True)[:self.exclude_featured]
-        )
-        if featured_ids:
-            queryset = queryset.exclude(pk__in=featured_ids)
+        exclude_count = self.exclude_featured
+        if exclude_count > 0:
+            featured_qs = base_qs.filter(is_featured=True)
+            if not self.get_edit_mode(request):
+                featured_qs = featured_qs.published()
+            featured_qs = featured_qs.translated(*languages)
+            featured_subquery = Subquery(
+                featured_qs.values('pk')[:exclude_count]
+            )
+            queryset = queryset.exclude(pk__in=featured_subquery)
         return queryset[:self.latest_articles]
 
     def __str__(self):
@@ -539,7 +546,7 @@ class NewsBlogTagsPlugin(PluginEditModeMixin, NewsBlogCMSPlugin):
         articles = articles.translated(*languages)
         qs = Tag.objects.filter(
             taggit_taggeditem_items__content_type=article_ct,
-            taggit_taggeditem_items__object_id__in=articles.values_list('pk', flat=True),
+            taggit_taggeditem_items__object_id__in=Subquery(articles.values('pk')),
         ).annotate(article_count=Count('taggit_taggeditem_items'))
         tags = list(qs.order_by('-article_count'))
         cache.set(cache_key, tags)
