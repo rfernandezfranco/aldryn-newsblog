@@ -257,7 +257,20 @@ class ArticleList(ArticleListBase):
         qs = (
             super(ArticleList, self)
             .get_queryset()
-            .select_related("author")
+            .select_related(
+                "author",
+                "owner",
+                "featured_image",
+                "app_config",
+            )
+            .prefetch_related(
+                "categories",
+                "tags",
+                "categories__translations",
+                "translations",
+                "tagged_items__tag",
+            )
+            .defer("content", "lead_in")
         )
         # exclude featured articles from queryset, to allow featured article
         # plugin on the list view page without duplicate entries in page qs.

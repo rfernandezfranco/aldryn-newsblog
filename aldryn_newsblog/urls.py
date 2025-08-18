@@ -1,4 +1,6 @@
 from django.urls import re_path as url
+from django.views.decorators.cache import cache_page
+from django.views.decorators.vary import vary_on_headers
 
 from aldryn_newsblog.feeds import CategoryFeed, LatestArticlesFeed, TagFeed
 from aldryn_newsblog.views import (
@@ -10,7 +12,10 @@ from aldryn_newsblog.views import (
 
 urlpatterns = [
     url(r'^$',
-        ArticleList.as_view(), name='article-list'),
+        cache_page(60 * 10)(
+            vary_on_headers('Accept-Language')(ArticleList.as_view())
+        ),
+        name='article-list'),
     url(r'^feed/$', LatestArticlesFeed(), name='article-list-feed'),
 
     url(r'^search/$',
