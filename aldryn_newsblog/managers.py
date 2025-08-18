@@ -98,9 +98,11 @@ class RelatedManager(ManagerMixin, TranslatableManager):
             # return empty iterable early not to perform useless requests
             return []
 
+        from django.db.models import Subquery
+
         tags = Tag.objects.filter(
-            taggit_taggeditem__object_id__in=articles.values("pk")
-        ).annotate(
+            taggit_taggeditem__object_id__in=Subquery(articles.only("pk"))
+        ).prefetch_related('taggit_taggeditem__tag').annotate(
             num_articles=Count("taggit_taggeditem")
         ).order_by("-num_articles")
 
