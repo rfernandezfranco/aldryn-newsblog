@@ -2,11 +2,10 @@
 
 from __future__ import unicode_literals
 
-import datetime
-from collections import Counter
 from operator import attrgetter
 
 from django.db import models
+from django.db.models.functions import TruncMonth
 from django.utils.timezone import now
 
 from aldryn_apphooks_config.managers.base import ManagerMixin, QuerySetMixin
@@ -53,26 +52,22 @@ class RelatedManager(ManagerMixin, TranslatableManager):
         ]
         """
 
-        # TODO: check if this limitation still exists in Django 1.6+
-        # This is done in a naive way as Django is having tough time while
-        # aggregating on date fields
         if (request and hasattr(request, 'toolbar') and  # noqa: #W504
                 request.toolbar and toolbar_edit_mode_active(request)):
             articles = self.namespace(namespace)
         else:
             articles = self.published().namespace(namespace)
-        dates = articles.values_list('publishing_date', flat=True)
-        dates = [(x.year, x.month) for x in dates]
-        date_counter = Counter(dates)
-        dates = set(dates)
-        dates = sorted(dates, reverse=True)
-        months = [
-            # Use day=3 to make sure timezone won't affect this hacks'
-            # month value. There are UTC+14 and UTC-12 timezones!
-            {'date': datetime.date(year=year, month=month, day=3),
-             'num_articles': date_counter[(year, month)]}
-            for year, month in dates]
-        return months
+        months = (
+            articles
+            .annotate(month=TruncMonth('publishing_date'))
+            .values('month')
+            .annotate(num_articles=models.Count('pk'))
+            .order_by('-month')
+        )
+        return [
+            {'date': month['month'].date(), 'num_articles': month['num_articles']}
+            for month in months
+        ]
 
     def get_authors(self, namespace):
         """
