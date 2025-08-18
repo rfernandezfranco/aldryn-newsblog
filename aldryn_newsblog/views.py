@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 
 from datetime import date, datetime
 
-from django.db.models import Q, Subquery
+from django.db.models import Count, Q, Subquery
 from django.http import (
     Http404, HttpResponsePermanentRedirect, HttpResponseRedirect,
 )
@@ -197,6 +197,18 @@ class ArticleListBase(AppConfigMixin, AppHookCheckMixin, TemplatePrefixMixin,
                       PreviewModeMixin, ViewUrlMixin, ListView):
     model = Article
     show_header = False
+
+    def get_queryset(self):
+        qs = (
+            super(ArticleListBase, self)
+            .get_queryset()
+            .prefetch_related("categories", "tags")
+            .annotate(
+                categories_count=Count("categories", distinct=True),
+                tags_count=Count("tags", distinct=True),
+            )
+        )
+        return qs
 
     def get_paginate_by(self, queryset):
         if self.paginate_by is not None:

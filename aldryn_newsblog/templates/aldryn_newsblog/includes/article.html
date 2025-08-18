@@ -1,5 +1,6 @@
-{% load i18n static thumbnail cms_tags apphooks_config_tags %}
+{% load i18n static thumbnail cms_tags apphooks_config_tags cache %}
 
+{% cache 600 "nb-article-card" article.pk request.LANGUAGE_CODE %}
 <article class="article
     {% if article.is_featured %} featured{% endif %}
     {% if not article.published %} unpublished{% endif %}">
@@ -11,7 +12,7 @@
         </p>
     {% endif %}
 
-    {% if article.categories.exists %}
+    {% if article.categories_count %}
         <p>
             {% for category in article.categories.all %}
                 <a href="{% namespace_url 'article-list-by-category' category.slug namespace=namespace default='' %}">{{ category.name }}</a>
@@ -32,7 +33,7 @@
 
     {% include "aldryn_newsblog/includes/author.html" with author=article.author %}
 
-    {% if article.tags %}
+    {% if article.tags_count %}
         <p>
             {% for tag in article.tags.all %}
                 <a href="{% namespace_url 'article-list-by-tag' tag=tag.slug namespace=namespace default='' %}">{{ tag.name }}</a>
@@ -46,3 +47,4 @@
         {% render_placeholder article.content language placeholder_language %}
     {% endif %}
 </article>
+{% endcache %}

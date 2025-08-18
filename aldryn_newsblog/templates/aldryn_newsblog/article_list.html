@@ -3,7 +3,7 @@
 
 {% block newsblog_content %}
     {% for article in article_list %}
-        {% include "aldryn_newsblog/includes/article.html" %}
+        {% include "aldryn_newsblog/includes/article.html" with article=article namespace=namespace request=request only %}
     {% empty %}
         <p>{% trans "No items available" %}</p>
     {% endfor %}
