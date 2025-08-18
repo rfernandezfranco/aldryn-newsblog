@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 
 from datetime import date, datetime
 
-from django.db.models import Q
+from django.db.models import Q, Subquery
 from django.http import (
     Http404, HttpResponsePermanentRedirect, HttpResponseRedirect,
 )
@@ -242,16 +242,22 @@ class ArticleList(ArticleListBase):
         return self.get(request, *args, **kwargs)
 
     def get_queryset(self):
-        qs = super(ArticleList, self).get_queryset()
+        qs = (
+            super(ArticleList, self)
+            .get_queryset()
+            .select_related("author")
+            .prefetch_related("categories", "tags")
+        )
         # exclude featured articles from queryset, to allow featured article
         # plugin on the list view page without duplicate entries in page qs.
         exclude_count = self.config.exclude_featured
         if exclude_count:
-            featured_qs = Article.objects.all().filter(is_featured=True)
+            featured_qs = Article.objects.filter(is_featured=True)
             if not self.edit_mode:
                 featured_qs = featured_qs.published()
-            exclude_featured = featured_qs[:exclude_count].values_list('pk')
-            qs = qs.exclude(pk__in=exclude_featured)
+            qs = qs.exclude(
+                pk__in=Subquery(featured_qs.values("pk")[:exclude_count])
+            )
         return qs
 
 
