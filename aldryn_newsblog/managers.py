@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 
 import datetime
 from collections import Counter
-from operator import attrgetter
+from django.db.models import Count
 
 from django.db import models
 from django.utils.timezone import now
@@ -12,7 +12,7 @@ from django.utils.timezone import now
 from aldryn_apphooks_config.managers.base import ManagerMixin, QuerySetMixin
 from aldryn_people.models import Person
 from parler.managers import TranslatableManager, TranslatableQuerySet
-from taggit.models import Tag, TaggedItem
+from taggit.models import Tag
 
 from aldryn_newsblog.compat import toolbar_edit_mode_active
 
@@ -102,17 +102,11 @@ class RelatedManager(ManagerMixin, TranslatableManager):
         if not articles:
             # return empty iterable early not to perform useless requests
             return []
-        kwargs = TaggedItem.bulk_lookup_kwargs(articles)
 
-        # aggregate and sort
-        counted_tags = dict(TaggedItem.objects
-                            .filter(**kwargs)
-                            .values('tag')
-                            .annotate(tag_count=models.Count('tag'))
-                            .values_list('tag', 'tag_count'))
+        tags = Tag.objects.filter(
+            taggit_taggeditem__object_id__in=articles.values("pk")
+        ).annotate(
+            num_articles=Count("taggit_taggeditem")
+        ).order_by("-num_articles")
 
-        # and finally get the results
-        tags = Tag.objects.filter(pk__in=counted_tags.keys())
-        for tag in tags:
-            tag.num_articles = counted_tags[tag.pk]
-        return sorted(tags, key=attrgetter('num_articles'), reverse=True)
+        return tags
