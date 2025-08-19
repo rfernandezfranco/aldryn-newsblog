@@ -1,12 +1,24 @@
 {% extends "aldryn_newsblog/base.html" %}
-{% load i18n %}
+{% load i18n cache %}
 
 {% block newsblog_content %}
-    {% for article in article_list %}
-        {% include "aldryn_newsblog/includes/article.html" with article=article namespace=namespace request=request only %}
-    {% empty %}
-        <p>{% trans "No items available" %}</p>
-    {% endfor %}
+    {% if not request.toolbar or not request.toolbar.edit_mode_active %}
+        {% cache 300 article_list page_obj.number request.LANGUAGE_CODE namespace %}
+            {% for article in article_list %}
+                {% include "aldryn_newsblog/includes/article.html" with article=article namespace=namespace request=request only %}
+            {% empty %}
+                <p>{% trans "No items available" %}</p>
+            {% endfor %}
 
-    {% include "aldryn_newsblog/includes/pagination.html" %}
+            {% include "aldryn_newsblog/includes/pagination.html" %}
+        {% endcache %}
+    {% else %}
+        {% for article in article_list %}
+            {% include "aldryn_newsblog/includes/article.html" with article=article namespace=namespace request=request only %}
+        {% empty %}
+            <p>{% trans "No items available" %}</p>
+        {% endfor %}
+
+        {% include "aldryn_newsblog/includes/pagination.html" %}
+    {% endif %}
 {% endblock %}
