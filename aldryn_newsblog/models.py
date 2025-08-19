@@ -165,6 +165,11 @@ class Article(TranslatedAutoSlugifyMixin,
 
     class Meta:
         ordering = ['-publishing_date']
+        indexes = [
+            models.Index(
+                fields=['is_published', '-publishing_date', 'app_config'],
+            ),
+        ]
 
     @property
     def published(self):
