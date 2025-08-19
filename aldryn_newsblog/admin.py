@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
+from django import forms
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
 
@@ -50,10 +51,20 @@ make_not_featured.short_description = _(
 
 
 class ArticleAdminForm(TranslatableModelForm):
+    pregenerate_thumbnail_now = forms.BooleanField(
+        label=_('Pregenerate thumbnail now'),
+        help_text=_(
+            'Check this to generate the thumbnail for the featured image upon'
+            ' saving. Improves front-end performance but may make saving a'
+            ' bit slower.'),
+        required=False,
+        initial=True
+    )
 
     class Meta:
         model = models.Article
         fields = [
+            'pregenerate_thumbnail_now',
             'app_config',
             'categories',
             'featured_image',
@@ -125,6 +136,7 @@ class ArticleAdmin(
                 'is_published',
                 'is_featured',
                 'featured_image',
+                'pregenerate_thumbnail_now',
                 'lead_in',
             )
         }),
@@ -170,6 +182,13 @@ class ArticleAdmin(
         data['owner'] = request.user.pk
         request.GET = data
         return super(ArticleAdmin, self).add_view(request, *args, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        # The `save()` method of the form is not used in the admin.
+        # The admin directly calls `obj.save()`. So we need to override
+        # `save_model` to pass our custom parameter.
+        pregenerate = form.cleaned_data.get('pregenerate_thumbnail_now', False)
+        obj.save(pregenerate_thumbnail=pregenerate)
 
 
 admin.site.register(models.Article, ArticleAdmin)
