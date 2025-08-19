@@ -270,7 +270,7 @@ class ArticleList(ArticleListBase):
                 "translations",
                 "tagged_items__tag",
             )
-            .defer("content", "lead_in")
+            .defer("content", "translations__lead_in")
         )
         # exclude featured articles from queryset, to allow featured article
         # plugin on the list view page without duplicate entries in page qs.
