@@ -2,6 +2,7 @@
 
 from __future__ import unicode_literals
 
+from collections import OrderedDict
 from distutils.version import LooseVersion
 
 from django.utils.translation import gettext_lazy as _
@@ -75,10 +76,43 @@ class NewsBlogArchivePlugin(AdjustableCacheMixin, NewsBlogPlugin):
 
         queryset = models.Article.objects
 
-        context['dates'] = queryset.get_months(
+        months = queryset.get_months(
             request,
             namespace=instance.app_config.namespace
         )
+
+        grouped = OrderedDict()
+        namespace = instance.app_config.namespace
+        for data in months:
+            date = data['date']
+            year = date.year
+            month = date.month
+
+            year_entry = grouped.get(year)
+            if year_entry is None:
+                year_entry = {
+                    'year': year,
+                    'url': default_reverse(
+                        '{0}:article-list-by-year'.format(namespace),
+                        kwargs={'year': year},
+                        default=''
+                    ),
+                    'months': []
+                }
+                grouped[year] = year_entry
+
+            month_entry = data.copy()
+            month_entry.update({
+                'month': month,
+                'url': default_reverse(
+                    '{0}:article-list-by-month'.format(namespace),
+                    kwargs={'year': year, 'month': month},
+                    default=''
+                )
+            })
+            year_entry['months'].append(month_entry)
+
+        context['dates'] = list(grouped.values())
         return context
 
 
